@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -19,7 +21,28 @@ jobs:
 
       - name: Install dependencies
         working-directory: workers/hello
-        run: npm install
+        run: npm ci
+
+      # 1. Линтер — проверка стиля и качества кода
+      - name: Lint
+        working-directory: workers/hello
+        run: npm run lint
+
+      # 2. Сканирование зависимостей — поиск уязвимостей в пакетах
+      - name: Dependency scan
+        working-directory: workers/hello
+        run: npm audit --audit-level=high
+
+      # 3. Сканирование секретов — поиск токенов и паролей в коде
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 4. Статический анализ — проверка типов TypeScript
+      - name: Static analysis
+        working-directory: workers/hello
+        run: npm run typecheck
 
       - name: Deploy to Cloudflare
         working-directory: workers/hello
