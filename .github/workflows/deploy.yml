@@ -9,8 +9,8 @@ on:
       - main
 
 jobs:
-  deploy-hello-worker:
-    name: Deploy hello-worker
+  deploy-userchat:
+    name: Deploy userchat-worker
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
@@ -21,14 +21,14 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: workers/hello/package-lock.json
+          cache-dependency-path: workers/userchat/package-lock.json
 
       - name: Install dependencies
-        working-directory: workers/hello
+        working-directory: workers/userchat
         run: npm ci
 
       - name: Deploy to Cloudflare
-        working-directory: workers/hello
+        working-directory: workers/userchat
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

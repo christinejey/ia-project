@@ -1,5 +1,5 @@
 {
-  "name": "hello-worker",
+  "name": "userchat-worker",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -9,10 +9,11 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0",
+    "@cloudflare/workers-types": "^4.0.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "wrangler": "^3.0.0"
   }
 }

@@ -20,14 +20,14 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: workers/hello/package-lock.json
+          cache-dependency-path: workers/userchat/package-lock.json
 
       - name: Install dependencies
-        working-directory: workers/hello
+        working-directory: workers/userchat
         run: npm ci
 
       - name: Run ESLint
-        working-directory: workers/hello
+        working-directory: workers/userchat
         run: npm run lint
 
   dependency-scan:
@@ -41,14 +41,14 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: workers/hello/package-lock.json
+          cache-dependency-path: workers/userchat/package-lock.json
 
       - name: Install dependencies
-        working-directory: workers/hello
+        working-directory: workers/userchat
         run: npm ci
 
       - name: Scan for vulnerabilities
-        working-directory: workers/hello
+        working-directory: workers/userchat
         run: npm audit --audit-level=high
 
   secret-scan:
@@ -75,12 +75,12 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: workers/hello/package-lock.json
+          cache-dependency-path: workers/userchat/package-lock.json
 
       - name: Install dependencies
-        working-directory: workers/hello
+        working-directory: workers/userchat
         run: npm ci
 
       - name: TypeScript type check
-        working-directory: workers/hello
+        working-directory: workers/userchat
         run: npm run typecheck
