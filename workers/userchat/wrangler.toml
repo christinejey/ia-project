@@ -2,8 +2,6 @@ name = "userchat-worker"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
-# Create KV namespace: wrangler kv:namespace create userchat-kv
-# Then replace the id below with the output
 [[kv_namespaces]]
 binding = "CHAT_KV"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "8367a27cd28c48818886034521c20ca4"
