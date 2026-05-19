@@ -591,11 +591,41 @@ export const CHAT_HTML = `<!DOCTYPE html>
       };
 
       es.onerror = () => {
-        hideTyping();
         es.close();
         activeStream = null;
-        setInputBusy(false);
+        // SSE timed out — agent may still be working. Keep typing indicator
+        // visible and poll until the reply arrives (up to ~90 seconds total).
+        if (current === chatId) {
+          pollForReply(chatId, sendTs, 0, input);
+        } else {
+          hideTyping();
+          setInputBusy(false);
+        }
       };
+    }
+
+    async function pollForReply(chatId, after, attempt, input) {
+      if (current !== chatId || attempt >= 18) {
+        hideTyping();
+        setInputBusy(false);
+        return;
+      }
+      try {
+        const r = await fetch(\`/api/chats/\${chatId}/messages\`);
+        if (!r.ok) { hideTyping(); setInputBusy(false); return; }
+        const msgs = await r.json();
+        const fresh = msgs.filter(m => m.role === 'assistant' && m.timestamp > after);
+        if (fresh.length > 0) {
+          hideTyping();
+          fresh.forEach(m => appendMsg(m));
+          setInputBusy(false);
+          input.focus();
+          return;
+        }
+      } catch {}
+      // Not found yet — retry with linear backoff (3s → 5s → 5s → …)
+      const delay = attempt < 2 ? 3000 : 5000;
+      setTimeout(() => pollForReply(chatId, after, attempt + 1, input), delay);
     }
 
     function onKey(e) {
