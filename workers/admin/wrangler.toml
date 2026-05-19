@@ -1,0 +1,14 @@
+name = "admin-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "KV_USERS"
+id = "f7936ef6353948b798f1ddfe82e0528c"
+
+[[kv_namespaces]]
+binding = "KV_CONFIG"
+id = "b73b90edb8314ef9aa9801b1d0be4f1b"
+
+# JWT_SECRET — add via: wrangler secret put JWT_SECRET --name admin-worker
