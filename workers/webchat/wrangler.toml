@@ -1,0 +1,13 @@
+name = "webchat-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "KV_USERS"
+id = "f7936ef6353948b798f1ddfe82e0528c"
+
+[[kv_namespaces]]
+binding = "KV_CHATS"
+id = "94b4a2b684154083a371573c6d99c737"
+
+# JWT_SECRET — add via: wrangler secret put JWT_SECRET
