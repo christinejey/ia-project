@@ -46,7 +46,7 @@ async function runAI(
 ): Promise<string> {
   type ChatInput = { messages: ContextEntry[] };
   type ChatOutput = { response?: string } | ReadableStream;
-  const run = ai.run as (model: string, input: ChatInput) => Promise<ChatOutput>;
+  const run = ai.run.bind(ai) as (model: string, input: ChatInput) => Promise<ChatOutput>;
   const out = await run(model, { messages });
   if (out instanceof ReadableStream) return '';
   return out.response?.trim() ?? '';
