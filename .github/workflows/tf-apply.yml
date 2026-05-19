@@ -39,10 +39,15 @@ jobs:
       - name: Terraform Plan
         id: plan
         working-directory: terraform
+        continue-on-error: true
         run: terraform plan -out=tfplan -input=false -detailed-exitcode
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Fail on plan error
+        if: steps.plan.outputs.exitcode == '1'
+        run: exit 1
 
       - name: Show Plan
         working-directory: terraform

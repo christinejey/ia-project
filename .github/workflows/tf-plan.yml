@@ -28,11 +28,16 @@ jobs:
       - name: Terraform Plan
         id: plan
         working-directory: terraform
+        continue-on-error: true  # exit code 2 (changes present) must not fail the step
         run: terraform plan -out=tfplan -input=false -detailed-exitcode
         env:
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         # exit code 0 = no changes, 1 = error, 2 = changes present
+
+      - name: Fail on plan error
+        if: steps.plan.outputs.exitcode == '1'
+        run: exit 1
 
       - name: Show Plan Summary
         if: steps.plan.outputs.exitcode == '2'
