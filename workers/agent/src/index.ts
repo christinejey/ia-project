@@ -61,24 +61,16 @@ async function processMessage(body: QueueMsg, env: Env): Promise<void> {
     getContext(env.KV_CONTEXT, chatId),
   ]);
 
-  // Append user message and trim to MAX_CONTEXT before sending to AI
   const updatedCtx: ContextEntry[] = [...context, { role: 'user' as const, content }].slice(-MAX_CONTEXT);
 
   const reply =
     (await runAI(env.AI, model, [{ role: 'system', content: systemPrompt }, ...updatedCtx])) ||
     'Sorry, I could not generate a response.';
 
-  // Write assistant message to KV_CHATS so the SSE stream picks it up
   const messages = await getMessages(env.KV_CHATS, userId, chatId);
-  messages.push({
-    id: crypto.randomUUID(),
-    role: 'assistant',
-    content: reply,
-    timestamp: Date.now(),
-  });
+  messages.push({ id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: Date.now() });
   await env.KV_CHATS.put(`messages:${userId}:${chatId}`, JSON.stringify(messages));
 
-  // Persist updated context (user turn + assistant reply)
   const nextCtx: ContextEntry[] = [...updatedCtx, { role: 'assistant' as const, content: reply }].slice(
     -MAX_CONTEXT,
   );
