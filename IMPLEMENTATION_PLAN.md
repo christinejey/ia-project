@@ -76,18 +76,28 @@
   - `.github/workflows/tf-plan.yml` — `workflow_dispatch`: plan → artifact (5 дней)
   - `.github/workflows/tf-apply.yml` — `workflow_dispatch`: plan → approval gate → apply
 
-- [ ] **1.4** Добавить GitHub Secrets (вручную в настройках репозитория):
+- [x] **1.4** Добавить GitHub Secrets (вручную в настройках репозитория):
   - `CLOUDFLARE_API_TOKEN`
   - `CLOUDFLARE_ACCOUNT_ID`
   - `TF_BACKEND_ENDPOINT` (`https://<ACCOUNT_ID>.r2.cloudflarestorage.com`)
   - `R2_ACCESS_KEY_ID`
   - `R2_SECRET_ACCESS_KEY`
 
-- [ ] **1.5** Создать R2 bucket `ia-project-tfstate` в Cloudflare dashboard (вручную, один раз)
+- [x] **1.5** Создать R2 bucket `ia-project-tfstate` в Cloudflare dashboard (вручную, один раз)
 
-- [ ] **1.6** Настроить GitHub Environment `production` с required reviewers (Settings → Environments)
+- [x] **1.6** Настроить GitHub Environment `production` с required reviewers (Settings → Environments)
 
-- [ ] **1.7** Прогнать `tf-validate` → `tf-plan` → `tf-apply` в production
+- [x] **1.7** Прогнать `tf-validate` → `tf-plan` → `tf-apply` в production
+
+### Созданные ресурсы (terraform outputs)
+
+| Binding | KV Namespace ID |
+|---|---|
+| `KV_CHATS` | `94b4a2b684154083a371573c6d99c737` |
+| `KV_CONFIG` | `b73b90edb8314ef9aa9801b1d0be4f1b` |
+| `KV_CONTEXT` | `ed4363ad4d3b451a822d37a16176b4ab` |
+| `KV_USERS` | `f7936ef6353948b798f1ddfe82e0528c` |
+| Queue `ia-messages-queue` | `9286acf4419248e1b83ca227e3c3b567` |
 
 ### Результат фазы 1
 Все KV Namespaces и Queue созданы в Cloudflare. ID вынесены в `outputs.tf`.
@@ -486,7 +496,7 @@ Agent Core получает сообщения из Queue, вызывает AI, 
 | Фаза | Статус |
 |---|---|
 | Фаза 0 — Документация | ✅ Выполнено |
-| Фаза 1 — Инфраструктура | 🔄 Частично (файлы созданы, ручные шаги 1.4–1.7 остались) |
+| Фаза 1 — Инфраструктура | ✅ Выполнено |
 | Фаза 2 — Аутентификация | 🔲 Не начато |
 | Фаза 3 — Web Chat Worker | 🔲 Не начато |
 | Фаза 4 — Agent Core Worker | 🔲 Не начато |
