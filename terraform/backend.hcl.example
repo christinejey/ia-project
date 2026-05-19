@@ -1,0 +1,11 @@
+# Copy to backend.hcl and fill in your values (backend.hcl is gitignored)
+# terraform init -backend-config=backend.hcl
+
+endpoints = {
+  s3 = "https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
+}
+
+access_key                 = "<R2_ACCESS_KEY_ID>"
+secret_key                 = "<R2_SECRET_ACCESS_KEY>"
+skip_requesting_account_id = true
+use_path_style             = true

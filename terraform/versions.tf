@@ -8,26 +8,19 @@ terraform {
     }
   }
 
-  # Backend credentials and endpoint are passed via environment variables — no -backend-config flags needed.
-  # Prerequisites before first apply:
-  #   1. Create R2 bucket "ia-project-tfstate" in Cloudflare dashboard
-  #   2. Create R2 API token (Object Read & Write on that bucket)
-  #   3. Add GitHub Secrets: TF_BACKEND_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+  # Sensitive and version-specific backend params are injected at init time via backend.hcl.
+  # CI generates terraform/backend.hcl from GitHub Secrets before running terraform init.
   #
   # Local init (one-time):
-  #   export AWS_ENDPOINT_URL_S3="https://<ACCOUNT_ID>.r2.cloudflarestorage.com"
-  #   export AWS_ACCESS_KEY_ID="<R2_ACCESS_KEY_ID>"
-  #   export AWS_SECRET_ACCESS_KEY="<R2_SECRET_ACCESS_KEY>"
-  #   terraform init
+  #   create terraform/backend.hcl with content from terraform/backend.hcl.example
+  #   terraform init -backend-config=backend.hcl
   backend "s3" {
     bucket = "ia-project-tfstate"
     key    = "production/terraform.tfstate"
-    region = "auto"
+    region = "us-east-1"
 
     skip_credentials_validation = true
     skip_metadata_api_check     = true
     skip_region_validation      = true
-    skip_requesting_account_id  = true
-    force_path_style            = true
   }
 }
