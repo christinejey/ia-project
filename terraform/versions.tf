@@ -8,19 +8,23 @@ terraform {
     }
   }
 
-  # Sensitive and version-specific backend params are injected at init time via backend.hcl.
-  # CI generates terraform/backend.hcl from GitHub Secrets before running terraform init.
+  # Dynamic backend values (endpoint, credentials) are passed via -backend-config flags at init time.
+  # See .github/workflows/tf-plan.yml and tf-apply.yml for CI usage.
   #
-  # Local init (one-time):
-  #   create terraform/backend.hcl with content from terraform/backend.hcl.example
-  #   terraform init -backend-config=backend.hcl
+  # Local init:
+  #   terraform init \
+  #     -backend-config="endpoint=https://<ACCOUNT_ID>.r2.cloudflarestorage.com" \
+  #     -backend-config="access_key=<R2_ACCESS_KEY_ID>" \
+  #     -backend-config="secret_key=<R2_SECRET_ACCESS_KEY>" \
+  #     -backend-config="skip_requesting_account_id=true"
   backend "s3" {
     bucket = "ia-project-tfstate"
     key    = "production/terraform.tfstate"
-    region = "us-east-1"
+    region = "auto"
 
     skip_credentials_validation = true
     skip_metadata_api_check     = true
     skip_region_validation      = true
+    force_path_style            = true
   }
 }

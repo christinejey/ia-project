@@ -14,23 +14,14 @@ jobs:
         with:
           terraform_version: "~1.6"
 
-      - name: Write backend config
-        run: |
-          cat > terraform/backend.hcl <<EOF
-          endpoints                  = { s3 = "${ENDPOINT}" }
-          access_key                 = "${KEY_ID}"
-          secret_key                 = "${SECRET}"
-          skip_requesting_account_id = true
-          use_path_style             = true
-          EOF
-        env:
-          ENDPOINT: ${{ secrets.TF_BACKEND_ENDPOINT }}
-          KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          SECRET: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-
       - name: Terraform Init
         working-directory: terraform
-        run: terraform init -backend-config=backend.hcl
+        run: |
+          terraform init \
+            -backend-config="endpoint=${{ secrets.TF_BACKEND_ENDPOINT }}" \
+            -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
+            -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+            -backend-config="skip_requesting_account_id=true"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -38,12 +29,11 @@ jobs:
       - name: Terraform Plan
         id: plan
         working-directory: terraform
-        continue-on-error: true  # exit code 2 (changes present) must not fail the step
+        continue-on-error: true
         run: terraform plan -out=tfplan -input=false -detailed-exitcode
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        # exit code 0 = no changes, 1 = error, 2 = changes present
 
       - name: Fail on plan error
         if: steps.plan.outputs.exitcode == '1'

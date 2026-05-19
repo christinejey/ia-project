@@ -12,7 +12,6 @@ on:
           - production
 
 jobs:
-  # Plan runs first so reviewers can see exactly what will change
   plan:
     name: Plan
     runs-on: ubuntu-latest
@@ -25,23 +24,14 @@ jobs:
         with:
           terraform_version: "~1.6"
 
-      - name: Write backend config
-        run: |
-          cat > terraform/backend.hcl <<EOF
-          endpoints                  = { s3 = "${ENDPOINT}" }
-          access_key                 = "${KEY_ID}"
-          secret_key                 = "${SECRET}"
-          skip_requesting_account_id = true
-          use_path_style             = true
-          EOF
-        env:
-          ENDPOINT: ${{ secrets.TF_BACKEND_ENDPOINT }}
-          KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          SECRET: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-
       - name: Terraform Init
         working-directory: terraform
-        run: terraform init -backend-config=backend.hcl
+        run: |
+          terraform init \
+            -backend-config="endpoint=${{ secrets.TF_BACKEND_ENDPOINT }}" \
+            -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
+            -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+            -backend-config="skip_requesting_account_id=true"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -73,8 +63,6 @@ jobs:
           path: terraform/tfplan
           retention-days: 1
 
-  # Apply waits for manual approval via GitHub Environment protection rules.
-  # Configure "production" environment in repo Settings → Environments → Required reviewers.
   apply:
     name: Apply
     needs: plan
@@ -88,23 +76,14 @@ jobs:
         with:
           terraform_version: "~1.6"
 
-      - name: Write backend config
-        run: |
-          cat > terraform/backend.hcl <<EOF
-          endpoints                  = { s3 = "${ENDPOINT}" }
-          access_key                 = "${KEY_ID}"
-          secret_key                 = "${SECRET}"
-          skip_requesting_account_id = true
-          use_path_style             = true
-          EOF
-        env:
-          ENDPOINT: ${{ secrets.TF_BACKEND_ENDPOINT }}
-          KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          SECRET: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-
       - name: Terraform Init
         working-directory: terraform
-        run: terraform init -backend-config=backend.hcl
+        run: |
+          terraform init \
+            -backend-config="endpoint=${{ secrets.TF_BACKEND_ENDPOINT }}" \
+            -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
+            -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+            -backend-config="skip_requesting_account_id=true"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
