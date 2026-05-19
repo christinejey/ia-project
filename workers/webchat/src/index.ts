@@ -113,7 +113,9 @@ async function handleSetup(request: Request, env: Env): Promise<Response> {
 }
 
 function handleStream(chatId: string, userId: string, url: URL, env: Env): Response {
-  const after = parseInt(url.searchParams.get('after') ?? '0', 10);
+  // afterId: the ID of the user message just sent — we look for any assistant
+  // message that appears AFTER it in the array. This avoids all clock-skew issues.
+  const afterId = url.searchParams.get('afterId') ?? '';
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const enc = new TextEncoder();
@@ -124,7 +126,9 @@ function handleStream(chatId: string, userId: string, url: URL, env: Env): Respo
     try {
       while (polls < MAX_POLLS) {
         const msgs = await getMessages(env.KV_CHATS, userId, chatId);
-        const fresh = msgs.filter(m => m.role === 'assistant' && m.timestamp > after);
+        const afterIdx = afterId ? msgs.findIndex(m => m.id === afterId) : msgs.length - 1;
+        const fresh =
+          afterIdx >= 0 ? msgs.slice(afterIdx + 1).filter(m => m.role === 'assistant') : [];
         if (fresh.length > 0) {
           for (const msg of fresh) {
             await writer.write(enc.encode(`data: ${JSON.stringify(msg)}\n\n`));

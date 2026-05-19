@@ -567,19 +567,23 @@ export const CHAT_HTML = `<!DOCTYPE html>
       appendMsg({ role: 'user', content });
       showTyping();
 
-      // Use the server-returned timestamp as the SSE 'after' boundary.
-      // Client Date.now() can differ from server time, causing the filter
-      // m.timestamp > after to silently miss the agent's reply.
-      const res = await fetch(\`/api/chats/\${current}/messages\`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      });
-      const userMsg = await res.json();
-      const afterTs = userMsg.timestamp;
+      let afterId = '';
+      try {
+        const res = await fetch(\`/api/chats/\${current}/messages\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        });
+        const userMsg = await res.json();
+        afterId = userMsg.id ?? '';
+      } catch {
+        hideTyping();
+        setInputBusy(false);
+        return;
+      }
 
       const chatId = current;
-      const es = new EventSource(\`/api/chats/\${chatId}/stream?after=\${afterTs}\`);
+      const es = new EventSource(\`/api/chats/\${chatId}/stream?afterId=\${afterId}\`);
       activeStream = es;
 
       es.onmessage = (e) => {
@@ -595,10 +599,8 @@ export const CHAT_HTML = `<!DOCTYPE html>
       es.onerror = () => {
         es.close();
         activeStream = null;
-        // SSE timed out — agent may still be working. Keep typing indicator
-        // visible and poll until the reply arrives (up to ~90 seconds total).
         if (current === chatId) {
-          pollForReply(chatId, afterTs, 0, input);
+          pollForReply(chatId, afterId, 0, input);
         } else {
           hideTyping();
           setInputBusy(false);
@@ -606,7 +608,7 @@ export const CHAT_HTML = `<!DOCTYPE html>
       };
     }
 
-    async function pollForReply(chatId, after, attempt, input) {
+    async function pollForReply(chatId, afterId, attempt, input) {
       if (current !== chatId || attempt >= 18) {
         hideTyping();
         setInputBusy(false);
@@ -616,7 +618,10 @@ export const CHAT_HTML = `<!DOCTYPE html>
         const r = await fetch(\`/api/chats/\${chatId}/messages\`);
         if (!r.ok) { hideTyping(); setInputBusy(false); return; }
         const msgs = await r.json();
-        const fresh = msgs.filter(m => m.role === 'assistant' && m.timestamp > after);
+        const afterIdx = afterId ? msgs.findIndex(m => m.id === afterId) : msgs.length - 1;
+        const fresh = afterIdx >= 0
+          ? msgs.slice(afterIdx + 1).filter(m => m.role === 'assistant')
+          : [];
         if (fresh.length > 0) {
           hideTyping();
           fresh.forEach(m => appendMsg(m));
@@ -625,9 +630,8 @@ export const CHAT_HTML = `<!DOCTYPE html>
           return;
         }
       } catch {}
-      // Not found yet — retry with linear backoff (3s → 5s → 5s → …)
       const delay = attempt < 2 ? 3000 : 5000;
-      setTimeout(() => pollForReply(chatId, after, attempt + 1, input), delay);
+      setTimeout(() => pollForReply(chatId, afterId, attempt + 1, input), delay);
     }
 
     function onKey(e) {
