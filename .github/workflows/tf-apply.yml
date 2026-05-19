@@ -27,14 +27,13 @@ jobs:
 
       - name: Terraform Init
         working-directory: terraform
-        run: |
-          terraform init \
-            -backend-config="endpoint=${{ secrets.TF_BACKEND_ENDPOINT }}" \
-            -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
-            -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}"
+        run: terraform init
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.TF_BACKEND_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
       - name: Terraform Plan
         id: plan
@@ -80,14 +79,13 @@ jobs:
 
       - name: Terraform Init
         working-directory: terraform
-        run: |
-          terraform init \
-            -backend-config="endpoint=${{ secrets.TF_BACKEND_ENDPOINT }}" \
-            -backend-config="access_key=${{ secrets.R2_ACCESS_KEY_ID }}" \
-            -backend-config="secret_key=${{ secrets.R2_SECRET_ACCESS_KEY }}"
+        run: terraform init
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.TF_BACKEND_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
       - name: Download Plan
         uses: actions/download-artifact@v4
