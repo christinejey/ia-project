@@ -564,20 +564,22 @@ export const CHAT_HTML = `<!DOCTYPE html>
 
       input.value = '';
       setInputBusy(true);
-
-      const sendTs = Date.now();
-
-      appendMsg({ role: 'user', content, timestamp: sendTs });
+      appendMsg({ role: 'user', content });
       showTyping();
 
-      await fetch(\`/api/chats/\${current}/messages\`, {
+      // Use the server-returned timestamp as the SSE 'after' boundary.
+      // Client Date.now() can differ from server time, causing the filter
+      // m.timestamp > after to silently miss the agent's reply.
+      const res = await fetch(\`/api/chats/\${current}/messages\`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
+      const userMsg = await res.json();
+      const afterTs = userMsg.timestamp;
 
       const chatId = current;
-      const es = new EventSource(\`/api/chats/\${chatId}/stream?after=\${sendTs}\`);
+      const es = new EventSource(\`/api/chats/\${chatId}/stream?after=\${afterTs}\`);
       activeStream = es;
 
       es.onmessage = (e) => {
@@ -596,7 +598,7 @@ export const CHAT_HTML = `<!DOCTYPE html>
         // SSE timed out — agent may still be working. Keep typing indicator
         // visible and poll until the reply arrives (up to ~90 seconds total).
         if (current === chatId) {
-          pollForReply(chatId, sendTs, 0, input);
+          pollForReply(chatId, afterTs, 0, input);
         } else {
           hideTyping();
           setInputBusy(false);
