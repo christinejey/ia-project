@@ -32,8 +32,51 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+// SSE endpoint: polls KV every 500ms until an assistant message newer than `after` appears.
+// The Worker stays alive because the ReadableStream response body is still open.
+// Max 60 polls (30 seconds) to avoid runaway Workers.
+function handleStream(chatId: string, url: URL, env: Env): Response {
+  const after = parseInt(url.searchParams.get('after') ?? '0', 10);
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const enc = new TextEncoder();
+
+  (async () => {
+    const MAX_POLLS = 60;
+    let polls = 0;
+    try {
+      while (polls < MAX_POLLS) {
+        const msgs = await getMessages(env.CHAT_KV, chatId);
+        const fresh = msgs.filter(m => m.role === 'assistant' && m.timestamp > after);
+        if (fresh.length > 0) {
+          for (const msg of fresh) {
+            await writer.write(enc.encode(`data: ${JSON.stringify(msg)}\n\n`));
+          }
+          break;
+        }
+        // SSE comment keeps the connection alive through proxies
+        await writer.write(enc.encode(': ping\n\n'));
+        await new Promise<void>(r => setTimeout(r, 500));
+        polls++;
+      }
+    } catch {
+      // client disconnected — stream write will throw, exit silently
+    } finally {
+      await writer.close().catch(() => {});
+    }
+  })();
+
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no', // disable nginx buffering when behind a proxy
+    },
+  });
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const p = url.pathname;
     const m = request.method;
@@ -43,9 +86,7 @@ export default {
     }
 
     if (p === '/api/chats') {
-      if (m === 'GET') {
-        return json(await getChats(env.CHAT_KV));
-      }
+      if (m === 'GET') return json(await getChats(env.CHAT_KV));
       if (m === 'POST') {
         const { name } = (await request.json()) as { name: string };
         const chat: Chat = { id: crypto.randomUUID(), name: name || 'Chat', createdAt: Date.now() };
@@ -53,6 +94,12 @@ export default {
         await env.CHAT_KV.put('chats', JSON.stringify([chat, ...chats]));
         return json(chat, 201);
       }
+    }
+
+    // SSE stream — must be matched before the generic /messages route
+    const streamMatch = p.match(/^\/api\/chats\/([^/]+)\/stream$/);
+    if (streamMatch && m === 'GET') {
+      return handleStream(streamMatch[1], url, env);
     }
 
     const chatMatch = p.match(/^\/api\/chats\/([^/]+)(\/messages)?$/);
@@ -72,13 +119,23 @@ export default {
 
       if (withMessages && m === 'POST') {
         const { content } = (await request.json()) as { content: string };
+
+        // Save user message immediately and return — client subscribes via SSE
         const messages = await getMessages(env.CHAT_KV, chatId);
-        messages.push(
-          { id: crypto.randomUUID(), role: 'user', content, timestamp: Date.now() },
-          { id: crypto.randomUUID(), role: 'assistant', content, timestamp: Date.now() },
-        );
+        const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content, timestamp: Date.now() };
+        messages.push(userMsg);
         await env.CHAT_KV.put(`messages:${chatId}`, JSON.stringify(messages));
-        return json(messages);
+
+        // Simulate async agent: write assistant reply to KV after a delay.
+        // ctx.waitUntil keeps the Worker alive after the Response is sent.
+        ctx.waitUntil((async () => {
+          await new Promise<void>(r => setTimeout(r, 1500));
+          const current = await getMessages(env.CHAT_KV, chatId);
+          current.push({ id: crypto.randomUUID(), role: 'assistant', content, timestamp: Date.now() });
+          await env.CHAT_KV.put(`messages:${chatId}`, JSON.stringify(current));
+        })());
+
+        return json(userMsg, 201);
       }
     }
 
@@ -283,6 +340,27 @@ const HTML = `<!DOCTYPE html>
       border-bottom-left-radius: 5px;
     }
 
+    /* ── Typing indicator ── */
+    .bubble.typing {
+      padding: 12px 18px;
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+    .bubble.typing span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #aaa;
+      animation: bounce 1.1s infinite;
+    }
+    .bubble.typing span:nth-child(2) { animation-delay: 0.18s; }
+    .bubble.typing span:nth-child(3) { animation-delay: 0.36s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+      30% { transform: translateY(-5px); opacity: 1; }
+    }
+
     /* ── Input ── */
     .input-area {
       display: flex;
@@ -350,6 +428,7 @@ const HTML = `<!DOCTYPE html>
   <script>
     let current = null;
     let chats = [];
+    let activeStream = null; // current EventSource, closed before opening a new one
 
     async function init() {
       const r = await fetch('/api/chats');
@@ -387,6 +466,7 @@ const HTML = `<!DOCTYPE html>
 
     async function del(e, id) {
       e.stopPropagation();
+      if (activeStream) { activeStream.close(); activeStream = null; }
       await fetch(\`/api/chats/\${id}\`, { method: 'DELETE' });
       chats = chats.filter(c => c.id !== id);
       if (current === id) resetMain();
@@ -394,6 +474,7 @@ const HTML = `<!DOCTYPE html>
     }
 
     async function select(id) {
+      if (activeStream) { activeStream.close(); activeStream = null; }
       current = id;
       const chat = chats.find(c => c.id === id);
       const av = document.getElementById('mainAvatar');
@@ -411,9 +492,9 @@ const HTML = `<!DOCTYPE html>
     }
 
     function resetMain() {
+      if (activeStream) { activeStream.close(); activeStream = null; }
       current = null;
-      const av = document.getElementById('mainAvatar');
-      av.style.display = 'none';
+      document.getElementById('mainAvatar').style.display = 'none';
       const title = document.getElementById('mainTitle');
       title.textContent = 'Select a chat';
       title.classList.remove('active');
@@ -423,6 +504,7 @@ const HTML = `<!DOCTYPE html>
         '<div class="empty-state"><div class="icon">💬</div><p>Select a chat or create a new one</p></div>';
     }
 
+    // Used for initial history load only
     function renderMsgs(msgs) {
       const el = document.getElementById('messages');
       if (!msgs.length) {
@@ -437,20 +519,85 @@ const HTML = `<!DOCTYPE html>
       el.scrollTop = el.scrollHeight;
     }
 
+    // Appends a single message without re-rendering the whole list
+    function appendMsg(msg) {
+      const el = document.getElementById('messages');
+      const empty = el.querySelector('.empty-state');
+      if (empty) empty.remove();
+      const wrap = document.createElement('div');
+      wrap.className = \`msg-wrap \${msg.role}\`;
+      wrap.innerHTML = \`<div class="bubble \${msg.role}">\${esc(msg.content)}</div>\`;
+      el.appendChild(wrap);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function showTyping() {
+      const el = document.getElementById('messages');
+      const empty = el.querySelector('.empty-state');
+      if (empty) empty.remove();
+      const wrap = document.createElement('div');
+      wrap.className = 'msg-wrap assistant';
+      wrap.id = 'typing-indicator';
+      wrap.innerHTML = '<div class="bubble typing"><span></span><span></span><span></span></div>';
+      el.appendChild(wrap);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function hideTyping() {
+      const t = document.getElementById('typing-indicator');
+      if (t) t.remove();
+    }
+
+    function setInputBusy(busy) {
+      document.getElementById('msgInput').disabled = busy;
+      document.getElementById('sendBtn').disabled = busy;
+    }
+
     async function send() {
       const input = document.getElementById('msgInput');
       const content = input.value.trim();
       if (!content || !current) return;
+
+      // Close any previous stream before starting a new exchange
+      if (activeStream) { activeStream.close(); activeStream = null; }
+
       input.value = '';
-      document.getElementById('sendBtn').disabled = true;
-      const r = await fetch(\`/api/chats/\${current}/messages\`, {
+      setInputBusy(true);
+
+      const sendTs = Date.now();
+
+      // Optimistic render — show user message immediately without waiting for server
+      appendMsg({ role: 'user', content, timestamp: sendTs });
+      showTyping();
+
+      // POST saves only the user message; agent reply is written async via ctx.waitUntil
+      await fetch(\`/api/chats/\${current}/messages\`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content })
+        body: JSON.stringify({ content }),
       });
-      renderMsgs(await r.json());
-      document.getElementById('sendBtn').disabled = false;
-      input.focus();
+
+      // Open SSE stream and wait for the assistant reply (timestamp > sendTs)
+      const chatId = current;
+      const es = new EventSource(\`/api/chats/\${chatId}/stream?after=\${sendTs}\`);
+      activeStream = es;
+
+      es.onmessage = (e) => {
+        if (current !== chatId) { es.close(); return; } // user switched chat
+        hideTyping();
+        appendMsg(JSON.parse(e.data));
+        es.close();
+        activeStream = null;
+        setInputBusy(false);
+        input.focus();
+      };
+
+      es.onerror = () => {
+        hideTyping();
+        es.close();
+        activeStream = null;
+        setInputBusy(false);
+      };
     }
 
     function onKey(e) {

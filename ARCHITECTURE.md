@@ -61,7 +61,7 @@
 - Вызов AI-модели (Cloudflare AI / OpenAI API)
 - Управление контекстом диалога (чтение/запись KV)
 - Возврат ответа в KV Chat History
-- SSE-стриминг для Admin Console
+- SSE-стриминг для Admin Console (server-side KV polling внутри Worker; Durable Object требуется для надёжных долгоживущих соединений)
 
 ### 2.3 Admin Console (`workers/admin`)
 
@@ -81,7 +81,7 @@
 | KV Namespace | Binding | Владелец | Содержимое |
 |---|---|---|---|
 | `ia-users-kv` | `KV_USERS` | webchat + admin | Пользователи, роли, хэши паролей |
-| `ia-chats-kv` | `KV_CHATS` | webchat | История чатов `messages:{userId}:{chatId}` |
+| `ia-chats-kv` | `KV_CHATS` | webchat + agent | История чатов `messages:{userId}:{chatId}` |
 | `ia-context-kv` | `KV_CONTEXT` | agent | Контекст диалога `context:{chatId}` |
 | `ia-config-kv` | `KV_CONFIG` | admin + agent | Конфигурация системы (модель, параметры) |
 
@@ -89,13 +89,14 @@
 
 ```
 KV_USERS
-├── "users"                        → User[]
-└── "user:{id}"                    → User
+├── "users"                        → string[]  (список login-ов)
+├── "user:{id}"                    → User
+└── "login:{login}"                → string    (userId — индекс для поиска при аутентификации)
 
 User {
   id: string
   login: string
-  passwordHash: string             -- bcrypt
+  passwordHash: string             -- PBKDF2 via crypto.subtle (Web Crypto API, не bcrypt)
   role: "admin" | "user"
   createdAt: number
 }
@@ -353,8 +354,9 @@ User message
 ```
 1. POST /login { login, password }
        │
-       ├─ KV_USERS.get("user:{login}")
-       ├─ bcrypt.compare(password, user.passwordHash)
+       ├─ KV_USERS.get("login:{login}")  → userId
+       ├─ KV_USERS.get("user:{userId}")  → User
+       ├─ crypto.subtle PBKDF2 verify(password, user.passwordHash)
        └─ выдать JWT / session cookie (httpOnly, Secure)
 
 2. Первый запуск (users = [])
@@ -399,9 +401,13 @@ User message
 
 ```yaml
 steps:
-  - wrangler deploy --config workers/webchat/wrangler.toml
-  - wrangler deploy --config workers/agent/wrangler.toml
-  - wrangler deploy --config workers/admin/wrangler.toml
+  # каждый шаг запускается из своей working-directory
+  - working-directory: workers/webchat
+    run: npx wrangler deploy
+  - working-directory: workers/agent
+    run: npx wrangler deploy
+  - working-directory: workers/admin
+    run: npx wrangler deploy
 ```
 
 ### Terraform Pipelines (ручной запуск)
@@ -478,7 +484,8 @@ ia-project/
 ├── terraform/               ← IaC для Cloudflare-ресурсов
 │   ├── main.tf
 │   ├── variables.tf
-│   └── outputs.tf
+│   ├── outputs.tf
+│   └── versions.tf
 ├── .github/workflows/
 │   ├── ci.yml
 │   ├── deploy.yml
@@ -486,7 +493,6 @@ ia-project/
 │   ├── tf-plan.yml
 │   └── tf-apply.yml
 ├── docs/
-│   ├── c4.md
 │   └── adr/
 ├── ARCHITECTURE.md          ← этот файл
 └── package.json

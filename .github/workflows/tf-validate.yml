@@ -1,0 +1,30 @@
+name: Terraform Validate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+
+      - name: Terraform Format Check
+        working-directory: terraform
+        run: terraform fmt -check -recursive
+
+      # -backend=false skips backend init — no credentials needed for validate
+      - name: Terraform Init (no backend)
+        working-directory: terraform
+        run: terraform init -backend=false
+        env:
+          TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Terraform Validate
+        working-directory: terraform
+        run: terraform validate
