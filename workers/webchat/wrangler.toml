@@ -10,4 +10,8 @@ id = "f7936ef6353948b798f1ddfe82e0528c"
 binding = "KV_CHATS"
 id = "94b4a2b684154083a371573c6d99c737"
 
+[[queues.producers]]
+queue = "ia-messages-queue"
+binding = "QUEUE"
+
 # JWT_SECRET — add via: wrangler secret put JWT_SECRET

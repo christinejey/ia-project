@@ -1,0 +1,24 @@
+name = "agent-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "KV_CHATS"
+id = "94b4a2b684154083a371573c6d99c737"
+
+[[kv_namespaces]]
+binding = "KV_CONTEXT"
+id = "ed4363ad4d3b451a822d37a16176b4ab"
+
+[[kv_namespaces]]
+binding = "KV_CONFIG"
+id = "b73b90edb8314ef9aa9801b1d0be4f1b"
+
+[[queues.consumers]]
+queue = "ia-messages-queue"
+max_batch_size = 5
+max_batch_timeout = 10
+max_retries = 3

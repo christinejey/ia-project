@@ -13,6 +13,13 @@ export interface Env {
   KV_USERS: KVNamespace;
   KV_CHATS: KVNamespace;
   JWT_SECRET: string;
+  QUEUE: Queue<QueueMsg>;
+}
+
+interface QueueMsg {
+  userId: string;
+  chatId: string;
+  content: string;
 }
 
 interface Chat {
@@ -147,7 +154,7 @@ function handleStream(chatId: string, userId: string, url: URL, env: Env): Respo
 // --- Router ---
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const p = url.pathname;
     const m = request.method;
@@ -224,21 +231,7 @@ export default {
         messages.push(userMsg);
         await putMessages(env.KV_CHATS, userId, chatId, messages);
 
-        // Placeholder agent: echo reply written after a delay via ctx.waitUntil.
-        // Phase 4 will replace this with a real Queue message to the agent worker.
-        ctx.waitUntil(
-          (async () => {
-            await new Promise<void>(r => setTimeout(r, 1500));
-            const current = await getMessages(env.KV_CHATS, userId, chatId);
-            current.push({
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: `Echo: ${content}`,
-              timestamp: Date.now(),
-            });
-            await putMessages(env.KV_CHATS, userId, chatId, current);
-          })(),
-        );
+        await env.QUEUE.send({ userId, chatId, content });
 
         return json(userMsg, 201);
       }
