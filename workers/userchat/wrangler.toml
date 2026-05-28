@@ -1,3 +1,6 @@
+# DEPRECATED — прототип, заменён на workers/webchat. Не деплоить.
+# workers_dev = false намеренно не выставлен, чтобы не сломать уже задеплоенный worker на Cloudflare.
+
 name = "userchat-worker"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"

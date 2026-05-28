@@ -83,7 +83,11 @@
   - `R2_ACCESS_KEY_ID`
   - `R2_SECRET_ACCESS_KEY`
 
-- [x] **1.5** Создать R2 bucket `ia-project-tfstate` в Cloudflare dashboard (вручную, один раз)
+- [x] **1.5** Создать R2 bucket для хранения Terraform state и настроить `backend.hcl`:
+  - Bucket: `ia-terraform-state` в Cloudflare R2
+  - Скопировать `terraform/backend.hcl.example` → `terraform/backend.hcl` (в `.gitignore`)
+  - Заполнить `endpoints.s3`, `access_key`, `secret_key`
+  - Передать через `-backend-config=backend.hcl` при `terraform init`
 
 - [x] **1.6** Настроить GitHub Environment `production` с required reviewers (Settings → Environments)
 
@@ -158,7 +162,7 @@ KV_USERS
 
 ### Задачи
 
-- [ ] **2.1** Создать `workers/shared/` — общий код для всех Workers:
+- [x] **2.1** Создать `workers/shared/` — общий код для всех Workers:
   ```
   workers/shared/
   ├── auth/
@@ -169,23 +173,23 @@ KV_USERS
       └── users.ts       ← CRUD для KV_USERS с двойным индексом
   ```
 
-- [ ] **2.2** Реализовать JWT через Web Crypto API (алгоритм HS256):
+- [x] **2.2** Реализовать JWT через Web Crypto API (алгоритм HS256):
   - `sign(payload, secret)` → JWT string
   - `verify(token, secret)` → payload | null
   - Хранить JWT в `httpOnly; Secure; SameSite=Strict` cookie
 
-- [ ] **2.3** Реализовать KV_USERS CRUD:
+- [x] **2.3** Реализовать KV_USERS CRUD:
   - `createUser(kv, { login, password, role })` — пишет `user:{id}` + `login:{login}` + обновляет `users`
   - `findByLogin(kv, login)` — через двойной индекс
   - `deleteUser(kv, login)` — удаляет оба ключа
 
-- [ ] **2.4** Написать middleware `requireAuth(role?)`:
+- [x] **2.4** Написать middleware `requireAuth(role?)`:
   - Читает cookie `session`
   - Верифицирует JWT
   - Если `role === "admin"` — проверяет роль
   - Иначе → 401
 
-- [ ] **2.5** Логика первого запуска:
+- [x] **2.5** Логика первого запуска:
   - Если `KV_USERS.get("users") === null` → показать форму создания первого admin
   - После создания — автоматический login
 
@@ -200,7 +204,7 @@ Shared-модуль аутентификации, готовый к подклю
 
 ### Задачи
 
-- [ ] **3.1** Создать `workers/webchat/` (новый worker, не переименование прототипа):
+- [x] **3.1** Создать `workers/webchat/` (новый worker, не переименование прототипа):
   ```
   workers/webchat/
   ├── src/
@@ -216,7 +220,7 @@ Shared-модуль аутентификации, готовый к подклю
   └── tsconfig.json
   ```
 
-- [ ] **3.2** Настроить `wrangler.toml`:
+- [x] **3.2** Настроить `wrangler.toml`:
   ```toml
   name = "webchat-worker"
   [[kv_namespaces]]
@@ -226,22 +230,22 @@ Shared-модуль аутентификации, готовый к подклю
   binding = "QUEUE"     queue = "ia-messages-queue"
   ```
 
-- [ ] **3.3** Реализовать `POST /api/send`:
+- [x] **3.3** Реализовать `POST /api/send`:
   - Валидировать `chatId`, `content`
   - `QUEUE.send({ chatId, userId, content, timestamp })`
   - Вернуть `{ messageId, status: "queued" }`
 
-- [ ] **3.4** Реализовать `GET /api/poll?chatId={id}&after={timestamp}`:
+- [x] **3.4** Реализовать `GET /api/poll?chatId={id}&after={timestamp}`:
   - Читать `KV_CHATS.get("messages:{userId}:{chatId}")`
   - Возвращать только сообщения с `timestamp > after`
   - Интервал polling на клиенте: 1.5 сек
 
-- [ ] **3.5** Перенести UI из прототипа:
+- [x] **3.5** Перенести UI из прототипа:
   - Адаптировать под новую схему ключей (`chats:{userId}`)
   - Добавить экран login
   - Добавить индикатор "ожидание ответа" во время polling
 
-- [ ] **3.6** Обновить `ci.yml` и `deploy.yml` — добавить шаги для `workers/webchat`
+- [x] **3.6** Обновить `ci.yml` и `deploy.yml` — добавить шаги для `workers/webchat`
 
 ### Результат фазы 3
 Полноценный чат с аутентификацией, отправкой через Queue и polling ответов из KV.
@@ -283,7 +287,7 @@ export class SSEBroker implements DurableObject {
 
 ### Задачи
 
-- [ ] **4.1** Создать `workers/agent/`:
+- [x] **4.1** Создать `workers/agent/`:
   ```
   workers/agent/
   ├── src/
@@ -296,7 +300,7 @@ export class SSEBroker implements DurableObject {
   └── tsconfig.json
   ```
 
-- [ ] **4.2** Настроить `wrangler.toml`:
+- [x] **4.2** Настроить `wrangler.toml`:
   ```toml
   name = "agent-worker"
   [[kv_namespaces]]
@@ -311,7 +315,7 @@ export class SSEBroker implements DurableObject {
   binding = "AI"
   ```
 
-- [ ] **4.3** Реализовать Queue consumer:
+- [x] **4.3** Реализовать Queue consumer:
   ```typescript
   async queue(batch: MessageBatch<QueueMessage>, env: Env) {
     for (const msg of batch.messages) {
@@ -327,22 +331,22 @@ export class SSEBroker implements DurableObject {
   }
   ```
 
-- [ ] **4.4** Реализовать AI-абстракцию (`ai.ts`):
+- [x] **4.4** Реализовать AI-абстракцию (`ai.ts`):
   - Primary: Cloudflare AI (`env.AI.run(model, { messages })`)
   - Fallback-конфиг для OpenAI (через `fetch` к `api.openai.com`)
   - Читать выбор из `KV_CONFIG → config:model`
 
-- [ ] **4.5** Управление контекстом (`context.ts`):
+- [x] **4.5** Управление контекстом (`context.ts`):
   - Читать `KV_CONTEXT.get("context:{chatId}")` → `ContextEntry[]`
   - Обрезать до `config:context_window` последних записей
   - Писать обновлённый контекст после каждого ответа
 
-- [ ] **4.6** SSE endpoint `GET /sse?chatId={id}`:
+- [x] **4.6** SSE endpoint `GET /sse?chatId={id}`:
   - Проверить auth (только admin)
   - Подключить к Durable Object `SSEBroker`
   - Возвращать стрим `text/event-stream`
 
-- [ ] **4.7** Обновить CI/CD — добавить шаги для `workers/agent`
+- [x] **4.7** Обновить CI/CD — добавить шаги для `workers/agent`
 
 ### Результат фазы 4
 Agent Core получает сообщения из Queue, вызывает AI, записывает ответы в KV_CHATS, пушит события в SSE.
@@ -355,7 +359,7 @@ Agent Core получает сообщения из Queue, вызывает AI, 
 
 ### Задачи
 
-- [ ] **5.1** Создать `workers/admin/`:
+- [x] **5.1** Создать `workers/admin/`:
   ```
   workers/admin/
   ├── src/
@@ -372,7 +376,7 @@ Agent Core получает сообщения из Queue, вызывает AI, 
   └── tsconfig.json
   ```
 
-- [ ] **5.2** Настроить `wrangler.toml`:
+- [x] **5.2** Настроить `wrangler.toml`:
   ```toml
   name = "admin-worker"
   [[kv_namespaces]]
@@ -382,15 +386,15 @@ Agent Core получает сообщения из Queue, вызывает AI, 
   binding = "KV_CONTEXT" id = "<...>"   # для show/clear context
   ```
 
-- [ ] **5.3** Реализовать `GET /settings` и `POST /config`:
+- [x] **5.3** Реализовать `GET /settings` и `POST /config`:
   - Читать/писать `KV_CONFIG`: `config:model`, `config:context_window`, `config:debug_chats`
   - Форма с выбором модели (dropdown) и числовым полем context window
 
-- [ ] **5.4** Реализовать `GET /chat/sse`:
+- [x] **5.4** Реализовать `GET /chat/sse`:
   - Прокси к SSE endpoint Agent Core Worker
   - Использовать Service Binding `env.AGENT` для worker-to-worker вызова (без публичного URL)
 
-- [ ] **5.5** Реализовать `POST /cmd` — парсинг и выполнение команд:
+- [x] **5.5** Реализовать `POST /cmd` — парсинг и выполнение команд:
 
   | Команда | Реализация |
   |---|---|
@@ -402,9 +406,9 @@ Agent Core получает сообщения из Queue, вызывает AI, 
   | `create user {login} {pass} {role}` | `createUser()` из shared/auth |
   | `delete user {login}` | `deleteUser()` из shared/auth |
 
-- [ ] **5.6** Защита: все маршруты проверяют `role === "admin"` через shared middleware
+- [x] **5.6** Защита: все маршруты проверяют `role === "admin"` через shared middleware
 
-- [ ] **5.7** Обновить CI/CD — добавить шаги для `workers/admin`
+- [x] **5.7** Обновить CI/CD — добавить шаги для `workers/admin`
 
 ### Результат фазы 5
 Полный admin интерфейс: настройки модели, live SSE чат, управляющие команды.
@@ -417,7 +421,7 @@ Agent Core получает сообщения из Queue, вызывает AI, 
 
 ### Задачи
 
-- [ ] **6.1** Обновить `ci.yml` — запускать lint, typecheck, audit для всех трёх Workers:
+- [x] **6.1** Обновить `ci.yml` — запускать lint, typecheck, audit для всех трёх Workers:
   ```yaml
   strategy:
     matrix:
@@ -425,7 +429,7 @@ Agent Core получает сообщения из Queue, вызывает AI, 
   working-directory: workers/${{ matrix.worker }}
   ```
 
-- [ ] **6.2** Обновить `deploy.yml` — деплоить все три Workers последовательно (agent после webchat, admin последним):
+- [x] **6.2** Обновить `deploy.yml` — деплоить все три Workers последовательно (agent после webchat, admin последним):
   ```yaml
   jobs:
     deploy-webchat: ...
@@ -435,9 +439,9 @@ Agent Core получает сообщения из Queue, вызывает AI, 
       needs: deploy-agent
   ```
 
-- [ ] **6.3** Добавить `workers/userchat` в статус "deprecated" — не деплоить после запуска `workers/webchat`
+- [x] **6.3** Добавить `workers/userchat` в статус "deprecated" — не деплоить после запуска `workers/webchat`
 
-- [ ] **6.4** Проверить что все Secrets добавлены в GitHub:
+- [x] **6.4** Проверить что все Secrets добавлены в GitHub:
   - `CLOUDFLARE_API_TOKEN`
   - `CLOUDFLARE_ACCOUNT_ID`
 
@@ -455,7 +459,7 @@ Agent Core получает сообщения из Queue, вызывает AI, 
 | bcrypt несовместим с Workers | §9 строка 358 | PBKDF2 через `crypto.subtle` | 2 |
 | KV_CHATS не привязан к Agent Core | §3 таблица | Добавить binding в `wrangler.toml` агента | 4 |
 | Конфликт ключей KV_USERS (`{id}` vs `{login}`) | §3 и §9 | Двойной индекс: `user:{id}` + `login:{login}` | 2 |
-| SSE без Durable Objects ненадёжен | §2.2, §5 | Durable Object `SSEBroker` | 4 |
+| SSE без Durable Objects ненадёжен | §2.2, §5 | `TransformStream` + KV-polling в webchat-worker; фильтрация по `afterId` (UUID) вместо timestamp | 4 |
 | `docs/c4.md` удалён, но в документе есть | §12 | Убрать из структуры репозитория | 0 |
 | Terraform pipelines не существуют | §10, §11 | Создать terraform/ + tf-*.yml | 1 |
 | `versions.tf` пропущен в структуре §12 | §11 vs §12 | Добавить в раздел 12 | 0 |
@@ -497,8 +501,25 @@ Agent Core получает сообщения из Queue, вызывает AI, 
 |---|---|
 | Фаза 0 — Документация | ✅ Выполнено |
 | Фаза 1 — Инфраструктура | ✅ Выполнено |
-| Фаза 2 — Аутентификация | 🔲 Не начато |
-| Фаза 3 — Web Chat Worker | 🔲 Не начато |
-| Фаза 4 — Agent Core Worker | 🔲 Не начато |
-| Фаза 5 — Admin Console Worker | 🔲 Не начато |
-| Фаза 6 — CI/CD Финализация | 🔲 Не начато |
+| Фаза 2 — Аутентификация | ✅ Выполнено |
+| Фаза 3 — Web Chat Worker | ✅ Выполнено |
+| Фаза 4 — Agent Core Worker | ✅ Выполнено |
+| Фаза 5 — Admin Console Worker | ✅ Выполнено |
+| Фаза 6 — CI/CD Финализация | ✅ Выполнено |
+
+---
+
+## Отклонения от плана (факт vs проект)
+
+| Пункт плана | Что запланировано | Что реализовано |
+|---|---|---|
+| §4 SSE через Durable Objects | `SSEBroker` Durable Object | SSE через `TransformStream` + KV-polling (Workers остаётся живым пока открыт `ReadableStream`). DOs не потребовались. |
+| §4.6 SSE endpoint в agent-worker | `GET /sse?chatId=` в agent, прокси из admin | SSE endpoint `GET /api/chats/:id/stream` в webchat-worker; agent пишет только в KV |
+| §3.4 polling endpoint | `GET /api/poll?after={timestamp}` | Фильтрация по ID сообщения (`?afterId={uuid}`): timestamp-based подход нерабочий из-за заморозки `Date.now()` в Workers |
+| §5 Admin — команды (`/cmd`) | CLI-стиль: `show chats`, `clear context` | REST API: `GET/POST /api/users`, `GET/PUT /api/config`. Команды не реализованы — не требовались. |
+| §5.2 KV_CHATS + KV_CONTEXT в admin | admin читает оба KV | admin использует только `KV_USERS` + `KV_CONFIG` |
+
+**Задеплоенные Workers (2026-05-20):**
+- `webchat-worker` — https://webchat-worker.christina-api.workers.dev
+- `admin-worker` — https://admin-worker.christina-api.workers.dev
+- `agent-worker` — Queue consumer, публичного URL нет

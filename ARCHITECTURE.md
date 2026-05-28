@@ -1,8 +1,6 @@
-# Architecture Plan — ia-project
+# Architecture — ia-project
 
-> Документ описывает целевую архитектуру системы.
-> Текущее состояние: прототип `userchat-worker` с echo-ответами.
-> Целевое состояние: полноценная AI-powered chat платформа на Cloudflare.
+> Документ описывает реализованную архитектуру системы (все фазы 0–6 завершены, все Workers задеплоены).
 
 ---
 
@@ -17,27 +15,39 @@
 7. [Admin Console — спецификация](#7-admin-console--спецификация)
 8. [Agent Core — спецификация](#8-agent-core--спецификация)
 9. [Authentication & Authorization](#9-authentication--authorization)
-10. [CI/CD Pipelines](#10-cicd-pipelines)
-11. [Infrastructure as Code (Terraform)](#11-infrastructure-as-code-terraform)
-12. [Структура репозитория](#12-структура-репозитория)
+10. [Shared Module (@ia/shared)](#10-shared-module-iashared)
+11. [CI/CD Pipelines](#11-cicd-pipelines)
+12. [Infrastructure as Code (Terraform)](#12-infrastructure-as-code-terraform)
+13. [Структура репозитория](#13-структура-репозитория)
+14. [Статус реализации](#14-статус-реализации)
 
 ---
 
 ## 1. Обзор системы
 
-Система состоит из трёх независимых Cloudflare Workers, взаимодействующих через Cloudflare-native механизмы (Queue, SSE, KV).
+Система состоит из трёх независимых Cloudflare Workers и общего модуля `@ia/shared`.
 
 ```
-┌─────────────────┐     Queue      ┌─────────────────┐
-│   Web Chat      │ ─────────────► │   Agent Core    │
-│   Worker        │ ◄───────────── │   Worker        │
-└─────────────────┘                └────────┬────────┘
-                                            │ SSE
-                                   ┌────────▼────────┐
-                                   │  Admin Console  │
-                                   │  Worker         │
-                                   └─────────────────┘
+Пользователь
+    │ HTTPS
+    ▼
+┌─────────────────┐   Queue.send()   ┌─────────────────┐
+│   webchat       │ ───────────────► │   agent         │
+│   Worker        │                  │   Worker        │
+│                 │   KV_CHATS.get() │                 │
+│  SSE polling ◄──┼──────────────────┤ KV_CHATS.put()  │
+└─────────────────┘                  └─────────────────┘
+
+Администратор
+    │ HTTPS
+    ▼
+┌─────────────────┐
+│   admin         │   KV_USERS + KV_CONFIG
+│   Worker        │
+└─────────────────┘
 ```
+
+Admin Console не имеет прямой связи с agent-worker — взаимодействие идёт через общие KV Namespaces.
 
 ---
 
@@ -47,56 +57,64 @@
 
 Пользовательский интерфейс чата. Обслуживает end-users.
 
-- Аутентификация по login/password
-- Список диалогов пользователя
-- История сообщений с навигацией по стрелкам
+- Аутентификация по login/password (JWT в `session` cookie)
+- Bootstrap первого администратора через `POST /api/setup`
+- Список диалогов пользователя, создание и удаление чатов
 - Отправка сообщений → Cloudflare Queue → Agent Core
-- Визуальный стиль: **Instagram**, бело-розовая палитра
+- Получение ответа: SSE (`GET /api/chats/:id/stream?afterId=`) с fallback-polling
+- Визуальный стиль: Instagram, бело-розовая палитра
 
 ### 2.2 Agent Core (`workers/agent`)
 
-Ядро AI-агента. Не имеет пользовательского интерфейса.
+Ядро AI-агента. Нет HTTP-endpoint, только Queue consumer.
 
-- Consume из Cloudflare Queue (входящие сообщения)
-- Вызов AI-модели (Cloudflare AI / OpenAI API)
-- Управление контекстом диалога (чтение/запись KV)
-- Возврат ответа в KV Chat History
-- SSE-стриминг для Admin Console (server-side KV polling внутри Worker; Durable Object требуется для надёжных долгоживущих соединений)
+- Consume сообщений из `ia-messages-queue`
+- Чтение конфига (модель, system prompt) из KV_CONFIG
+- Вызов Workers AI через `env.AI.run` (с `.bind(ai)` для сохранения контекста)
+- Сохранение ответа в KV_CHATS
+- Обновление контекста диалога в KV_CONTEXT (скользящее окно 20 записей)
 
 ### 2.3 Admin Console (`workers/admin`)
 
-Интерфейс администрирования системы. Доступен только пользователям с ролью `admin`.
+Интерфейс администрирования. Доступен только пользователям с ролью `admin`.
 
-- Настройка AI-модели и параметров
-- Тестовый чат с агентом через SSE
-- Управляющие команды (users, chats, context, debug)
-- Визуальный стиль: **Telegram**, бело-голубая палитра
+- Управление пользователями (создание, удаление, список)
+- Настройка AI: выбор модели и system prompt
+- Все маршруты защищены: `requireAuth(request, secret, 'admin')`
+- Визуальный стиль: Telegram, бело-голубая палитра
 
 ---
 
 ## 3. Хранилища данных (KV Namespaces)
 
-Каждый логический домен данных изолирован в отдельном KV namespace.
-
-| KV Namespace | Binding | Владелец | Содержимое |
+| KV Namespace | Binding | Worker-ы | Содержимое |
 |---|---|---|---|
-| `ia-users-kv` | `KV_USERS` | webchat + admin | Пользователи, роли, хэши паролей |
-| `ia-chats-kv` | `KV_CHATS` | webchat + agent | История чатов `messages:{userId}:{chatId}` |
-| `ia-context-kv` | `KV_CONTEXT` | agent | Контекст диалога `context:{chatId}` |
-| `ia-config-kv` | `KV_CONFIG` | admin + agent | Конфигурация системы (модель, параметры) |
+| `ia-users-kv` | `KV_USERS` | webchat, admin | Пользователи, роли, хэши паролей |
+| `ia-chats-kv` | `KV_CHATS` | webchat, agent | Список чатов и история сообщений |
+| `ia-context-kv` | `KV_CONTEXT` | agent | Скользящий контекст диалога |
+| `ia-config-kv` | `KV_CONFIG` | admin, agent | Конфигурация AI (модель, system prompt) |
+
+### Terraform ID (production)
+
+| Binding | KV Namespace ID |
+|---|---|
+| `KV_USERS` | `f7936ef6353948b798f1ddfe82e0528c` |
+| `KV_CHATS` | `94b4a2b684154083a371573c6d99c737` |
+| `KV_CONTEXT` | `ed4363ad4d3b451a822d37a16176b4ab` |
+| `KV_CONFIG` | `b73b90edb8314ef9aa9801b1d0be4f1b` |
 
 ### Схема данных
 
 ```
 KV_USERS
-├── "users"                        → string[]  (список login-ов)
-├── "user:{id}"                    → User
-└── "login:{login}"                → string    (userId — индекс для поиска при аутентификации)
+├── "users"                        → string[]     (список login-ов всех пользователей)
+├── "user:{id}"                    → User         (данные пользователя)
+└── "login:{login}"                → string       (userId — индекс для аутентификации)
 
 User {
-  id: string
+  id: string          (UUID)
   login: string
-  passwordHash: string             -- PBKDF2 via crypto.subtle (Web Crypto API, не bcrypt)
+  passwordHash: string  // формат: "saltHex:hashHex" (PBKDF2, 100 000 итераций, SHA-256)
   role: "admin" | "user"
   createdAt: number
 }
@@ -107,22 +125,21 @@ KV_CHATS
 ├── "chats:{userId}"               → Chat[]
 └── "messages:{userId}:{chatId}"   → Message[]
 
-Chat  { id, name, createdAt }
-Message { id, role, content, timestamp }
+Chat    { id: string, name: string, createdAt: number }
+Message { id: string, role: "user"|"assistant", content: string, timestamp: number }
 
 ---
 
 KV_CONTEXT
-└── "context:{chatId}"             → ContextEntry[]
+└── "context:{chatId}"             → ContextEntry[]   (последние 20 записей)
 
 ContextEntry { role: "user"|"assistant", content: string }
 
 ---
 
 KV_CONFIG
-├── "config:model"                 → string   ("@cf/meta/llama-3...")
-├── "config:context_window"        → number   (32)
-└── "config:debug_chats"           → string[] (chatId[])
+├── "config:model"                 → string   (ID модели, default: "@cf/meta/llama-3.1-8b-instruct")
+└── "config:system"                → string   (system prompt, default: "You are a helpful AI assistant.")
 ```
 
 ---
@@ -131,22 +148,30 @@ KV_CONFIG
 
 ### `ia-messages-queue`
 
+Queue ID: `9286acf4419248e1b83ca227e3c3b567`
+
 Асинхронная доставка сообщений от Web Chat к Agent Core.
 
 ```
-Web Chat
-  └─► Queue.send({ chatId, userId, content, timestamp })
-                          │
-                    [ia-messages-queue]
-                          │
-                    Agent Core (consumer)
-                      ├─ читает контекст из KV_CONTEXT
-                      ├─ вызывает AI модель
-                      ├─ записывает ответ в KV_CHATS
-                      └─ обновляет контекст в KV_CONTEXT
+webchat: POST /api/chats/:id/messages
+  └─► Queue.send({ userId, chatId, content })
+                     │
+               [ia-messages-queue]
+                     │
+              agent (consumer)
+                ├─ читает config из KV_CONFIG
+                ├─ читает контекст из KV_CONTEXT
+                ├─ вызывает AI модель
+                ├─ записывает ответ в KV_CHATS
+                └─ обновляет KV_CONTEXT
 ```
 
-Web Chat получает ответ агента путём **polling KV_CHATS** или через **WebSocket** (будущее расширение).
+Параметры consumer (wrangler.toml):
+- `max_batch_size = 5`
+- `max_batch_timeout = 10`
+- `max_retries = 3`
+
+Ответ агента webchat получает через **SSE с KV-polling** (см. §6).
 
 ---
 
@@ -154,45 +179,56 @@ Web Chat получает ответ агента путём **polling KV_CHATS*
 
 ```
 Пользователь
-    │
     │ HTTPS
     ▼
 ┌──────────────────────────────────────────────────┐
-│  Web Chat Worker (workers/webchat)               │
+│  webchat-worker                                  │
 │                                                  │
-│  GET  /          → HTML интерфейс                │
-│  POST /login     → аутентификация (KV_USERS)     │
-│  GET  /api/chats → список чатов (KV_CHATS)       │
-│  POST /api/send  → отправить сообщение в Queue   │
-│  GET  /api/poll  → получить ответ из KV_CHATS    │
-└──────────────────┬───────────────────────────────┘
+│  GET  /login                → HTML форма входа  │
+│  POST /api/setup            → bootstrap admin    │
+│  POST /api/login            → JWT cookie         │
+│  POST /api/logout           → clear cookie       │
+│                                                  │
+│  GET  /                     → HTML чата          │
+│  GET  /api/chats            → список чатов       │
+│  POST /api/chats            → создать чат        │
+│  DELETE /api/chats/:id      → удалить чат        │
+│  GET  /api/chats/:id/messages → история          │
+│  POST /api/chats/:id/messages → отправить        │──► Queue
+│  GET  /api/chats/:id/stream   → SSE ответ        │◄── KV poll
+└──────────────────────────────────────────────────┘
                    │ Queue.send()
                    ▼
           [ia-messages-queue]
-                   │ Queue consumer
+                   │ queue consumer
                    ▼
 ┌──────────────────────────────────────────────────┐
-│  Agent Core Worker (workers/agent)               │
+│  agent-worker (нет HTTP endpoint)                │
 │                                                  │
-│  consume(message)                                │
-│    ├─ KV_CONTEXT.get(context:{chatId})           │
-│    ├─ AI Model API call                          │
-│    ├─ KV_CHATS.put(messages:{userId}:{chatId})   │
-│    └─ KV_CONTEXT.put(context:{chatId})           │
-│                                                  │
-│  GET /sse        → SSE stream для Admin Console  │
-└──────────────────┬───────────────────────────────┘
-                   │ SSE (text/event-stream)
-                   ▼
+│  queue(batch)                                    │
+│    ├─ KV_CONFIG → модель, system prompt          │
+│    ├─ KV_CONTEXT → контекст чата                 │
+│    ├─ env.AI.run(model, messages)                │
+│    ├─ KV_CHATS ← ответ агента                    │
+│    └─ KV_CONTEXT ← обновлённый контекст          │
+└──────────────────────────────────────────────────┘
+
+Администратор
+    │ HTTPS
+    ▼
 ┌──────────────────────────────────────────────────┐
-│  Admin Console Worker (workers/admin)            │
+│  admin-worker                                    │
 │                                                  │
-│  GET  /          → HTML интерфейс                │
-│  POST /login     → аутентификация (KV_USERS)     │
-│  GET  /settings  → страница настроек             │
-│  POST /config    → сохранить конфиг (KV_CONFIG)  │
-│  GET  /chat/sse  → тестовый чат через SSE        │
-│  POST /cmd       → управляющие команды           │
+│  GET  /login                → HTML форма входа  │
+│  POST /api/login            → JWT cookie (admin) │
+│  POST /api/logout           → clear cookie       │
+│                                                  │
+│  GET  /                     → HTML консоли       │
+│  GET  /api/users            → список юзеров      │
+│  POST /api/users            → создать юзера      │
+│  DELETE /api/users/:login   → удалить юзера      │
+│  GET  /api/config           → текущий конфиг AI  │
+│  PUT  /api/config           → обновить конфиг AI │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -209,33 +245,69 @@ Web Chat получает ответ агента путём **polling KV_CHATS*
 │                  │                                       │
 │  Диалоги         │  История чата                        │
 │  ─────────       │  ─────────────────────────────────   │
-│  > Chat 1  ●     │                                       │
+│  > Chat 1        │                                       │
 │    Chat 2        │    Привет!              [пользователь]│
 │    Chat 3        │    [агент] Привет! Чем помочь?        │
 │                  │                                       │
 │  [+ Новый чат]   │    Расскажи о себе   [пользователь]  │
-│                  │    [агент] Я AI-ассистент...          │
+│                  │    [агент] ⏳ (typing indicator)       │
 │                  │                                       │
 │                  ├──────────────────────────────────────┤
-│                  │  Сообщение...                   [▲▼] │
 │                  │  ┌────────────────────────────┐ [→]  │
 │                  │  └────────────────────────────┘      │
 └──────────────────┴──────────────────────────────────────┘
 ```
 
-### Функции
+### SSE-механизм получения ответов
 
-- **Список чатов** (левая колонка): название, индикатор непрочитанных, кнопка удалить
-- **История чата** (правое поле): сообщения пользователя справа, агента слева
-- **Навигация стрелками** `▲` `▼`: перемещение между предыдущими отправленными сообщениями в поле ввода
-- **Поле ввода** (снизу): Enter — отправить, Shift+Enter — перенос строки
-- **Аутентификация**: форма login/password при первом открытии. Если пользователей нет — форма регистрации первого admin
+Cloudflare Workers stateless; Durable Objects не используются.
+Реализация: `TransformStream` + KV-polling внутри Worker.
+
+```
+1. POST /api/chats/:id/messages
+      → сохранить user-сообщение в KV (получаем userMsg.id)
+      → Queue.send(...)
+      ← вернуть { id, role, content, timestamp }
+
+2. GET /api/chats/:id/stream?afterId={userMsg.id}
+      Worker открывает TransformStream и запускает IIFE:
+        loop (max 60 итераций, ~30 сек):
+          msgs = KV_CHATS.get(...)
+          afterIdx = msgs.findIndex(m => m.id === afterId)
+          fresh = msgs после afterIdx с role === "assistant"
+          если fresh.length > 0 → отправить SSE event, закрыть
+          иначе → отправить ": ping\n\n", sleep 500ms
+      Возвращает ReadableStream с Content-Type: text/event-stream
+
+3. Клиентский fallback (если SSE обрывается):
+      pollForReply(chatId, afterId, attempt)
+        GET /api/chats/:id/messages
+        ищет ответ по afterId (тот же алгоритм)
+        повторяет до 18 раз (интервал 3–5 сек)
+```
+
+Почему фильтрация по ID, а не по timestamp: `Date.now()` в Workers заморожен на момент начала инвокации. Временна́я метка user-сообщения (webchat-worker) и метка ответа (agent-worker) приходят из разных инвокаций, поэтому сравнение по времени ненадёжно.
+
+### Маршруты
+
+| Метод | Путь | Описание |
+|---|---|---|
+| `GET` | `/login` | HTML форма входа |
+| `POST` | `/api/setup` | Bootstrap первого admin (только если нет пользователей) |
+| `POST` | `/api/login` | Аутентификация → JWT cookie |
+| `POST` | `/api/logout` | Очистить cookie |
+| `GET` | `/` | HTML чата (auth required) |
+| `GET` | `/api/chats` | Список чатов пользователя |
+| `POST` | `/api/chats` | Создать чат |
+| `DELETE` | `/api/chats/:id` | Удалить чат и его сообщения |
+| `GET` | `/api/chats/:id/messages` | История сообщений |
+| `POST` | `/api/chats/:id/messages` | Отправить сообщение → Queue |
+| `GET` | `/api/chats/:id/stream` | SSE-поток ответа агента |
 
 ### Визуальный стиль
 
 - Палитра: белый `#FFFFFF`, розовый `#E1306C`, светло-розовый `#FDF0F5`
 - Шрифт: `-apple-system, BlinkMacSystemFont, 'Segoe UI'`
-- Аватары: градиентные круги (Instagram-стиль)
 - Сообщения пользователя: градиент `#833ab4 → #c13584 → #e1306c`
 - Сообщения агента: светло-серый `#F0F0F0`
 
@@ -249,49 +321,40 @@ Web Chat получает ответ агента путём **polling KV_CHATS*
 ┌──────────────────────────────────────────────────────────┐
 │  ⚙ ia-admin                           [@admin]  [выход] │
 ├──────────────────────────────────────────────────────────┤
-│  [Настройки]  [Тестовый чат]  [Управление]              │
+│  [Настройки]  [Пользователи]                             │
 ├──────────────────────────────────────────────────────────┤
 │                                                          │
-│  Вкладка 1: Настройки параметров                        │
-│  ──────────────────────────────                          │
-│  AI Model:        [ @cf/meta/llama-3.1-8b-instruct ▼ ]  │
-│  Context Window:  [ 32 сообщения                      ]  │
+│  Вкладка: Настройки AI                                   │
+│  ─────────────────────────────────                       │
+│  AI Model:      [ @cf/meta/llama-3.1-8b-instruct      ]  │
+│  System Prompt: [ You are a helpful AI assistant.     ]  │
 │                                          [Сохранить]     │
 │                                                          │
-│  Вкладка 2: Тестовый чат (SSE)                          │
-│  ─────────────────────────────                           │
-│  [История тестового диалога с агентом]                   │
-│  ┌──────────────────────────────────┐                    │
-│  │ Введите сообщение...        [→]  │                    │
-│  └──────────────────────────────────┘                    │
+│  Вкладка: Пользователи                                   │
+│  ──────────────────────                                  │
+│  login      role   [удалить]                             │
+│  admin      admin                                        │
+│  user1      user   [удалить]                             │
 │                                                          │
-│  Вкладка 3: Управление                                   │
-│  ─────────────────────                                   │
-│  > show chats                                            │
-│  > show context {chatId}                                 │
-│  > debug on {chatId}                                     │
-│  > clear context {chatId}                                │
-│  > show users                                            │
-│  > create user {login} {password} {role}                 │
-│  > delete user {login}                                   │
-│  ┌──────────────────────────────────┐                    │
-│  │ $ _                         [↵]  │                    │
-│  └──────────────────────────────────┘                    │
+│  Создать пользователя:                                   │
+│  Login: [      ]  Password: [      ]  Role: [user ▼]     │
+│                                              [Создать]   │
 └──────────────────────────────────────────────────────────┘
 ```
 
-### Управляющие команды
+### Маршруты
 
-| Команда | Описание |
-|---|---|
-| `show chats` | Список всех активных чатов |
-| `show context {chatId}` | Текущий контекст диалога из KV_CONTEXT |
-| `debug on {chatId}` | Включить debug-режим для чата |
-| `debug off {chatId}` | Выключить debug-режим |
-| `clear context {chatId}` | Очистить контекст диалога |
-| `show users` | Список пользователей из KV_USERS |
-| `create user {login} {pass} {role}` | Создать пользователя |
-| `delete user {login}` | Удалить пользователя |
+| Метод | Путь | Описание |
+|---|---|---|
+| `GET` | `/login` | HTML форма входа |
+| `POST` | `/api/login` | Аутентификация (только role=admin) |
+| `POST` | `/api/logout` | Очистить cookie |
+| `GET` | `/` | HTML консоли (auth required, admin only) |
+| `GET` | `/api/users` | Список всех пользователей |
+| `POST` | `/api/users` | Создать пользователя |
+| `DELETE` | `/api/users/:login` | Удалить пользователя (self-delete → 409) |
+| `GET` | `/api/config` | Текущий конфиг AI (`model`, `system`) |
+| `PUT` | `/api/config` | Обновить конфиг AI |
 
 ### Визуальный стиль
 
@@ -306,40 +369,76 @@ Web Chat получает ответ агента путём **polling KV_CHATS*
 ### Queue Consumer
 
 ```typescript
-// workers/agent/src/index.ts
 export default {
-  async queue(batch: MessageBatch, env: Env): Promise<void> {
+  async queue(batch: MessageBatch<QueueMsg>, env: Env): Promise<void> {
     for (const msg of batch.messages) {
-      const { chatId, userId, content } = msg.body;
-      const context = await env.KV_CONTEXT.get(`context:${chatId}`);
-      const config   = await env.KV_CONFIG.get('config:model');
-      // AI model call → ответ → запись в KV_CHATS + KV_CONTEXT
+      try {
+        await processMessage(msg.body, env);
+        msg.ack();
+      } catch (err) {
+        console.error('agent: failed to process message', err);
+        msg.retry();
+      }
     }
-  },
-
-  async fetch(request: Request, env: Env): Promise<Response> {
-    // SSE endpoint для Admin Console
-    // GET /sse → text/event-stream
   }
-}
+};
 ```
 
-### AI Integration (первая итерация)
+### Логика processMessage
 
 ```
-User message
-    └─► context = KV_CONTEXT.get(chatId)    // история диалога
-    └─► response = AI.run(model, {
-              messages: [...context, { role: "user", content }]
-          })
-    └─► KV_CHATS.put(message + response)    // сохранить в историю
-    └─► KV_CONTEXT.put(updated context)     // обновить контекст
+1. Параллельно читаем:
+   - KV_CONFIG → config:model       (default: "@cf/meta/llama-3.1-8b-instruct")
+   - KV_CONFIG → config:system      (default: "You are a helpful AI assistant.")
+   - KV_CONTEXT → context:{chatId}  (история до 20 записей)
+
+2. Формируем messages для AI:
+   updatedCtx = [...context, { role: "user", content }].slice(-MAX_CONTEXT)
+   messages   = [{ role: "system", content: systemPrompt }, ...updatedCtx]
+   // slice применяется к объединённому массиву (context + user), а не только к context
+
+3. Вызываем Workers AI:
+   // .bind(ai) обязателен — casting ai.run теряет this-контекст класса
+   const run = ai.run.bind(ai) as (model, input) => Promise<output>;
+   const reply = await run(model, { messages });
+
+4. Записываем ответ:
+   KV_CHATS ← append { id: UUID, role: "assistant", content: reply, timestamp: Date.now() }
+
+5. Обновляем контекст (скользящее окно):
+   KV_CONTEXT ← [...context, { role: "user", content }, { role: "assistant", content: reply }]
+                .slice(-MAX_CONTEXT)   // MAX_CONTEXT = 20
 ```
 
-Поддерживаемые модели (через `KV_CONFIG → config:model`):
-- `@cf/meta/llama-3.1-8b-instruct` (Cloudflare AI, default)
-- `@cf/mistral/mistral-7b-instruct-v0.1`
-- Расширяется через настройки Admin Console
+### Поддерживаемые модели
+
+- `@cf/meta/llama-3.1-8b-instruct` (default)
+- Любая модель Cloudflare AI — меняется через Admin Console без редеплоя
+
+### Env bindings (wrangler.toml)
+
+```toml
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "KV_CHATS"      # чтение истории + запись ответа
+id = "94b4a2b684154083a371573c6d99c737"
+
+[[kv_namespaces]]
+binding = "KV_CONTEXT"    # скользящий контекст
+id = "ed4363ad4d3b451a822d37a16176b4ab"
+
+[[kv_namespaces]]
+binding = "KV_CONFIG"     # модель + system prompt
+id = "b73b90edb8314ef9aa9801b1d0be4f1b"
+
+[[queues.consumers]]
+queue = "ia-messages-queue"
+max_batch_size = 5
+max_batch_timeout = 10
+max_retries = 3
+```
 
 ---
 
@@ -347,93 +446,136 @@ User message
 
 ### Единое хранилище пользователей
 
-`KV_USERS` используется совместно Web Chat и Admin Console. Доступ к Admin Console требует роли `admin`.
+`KV_USERS` используется совместно webchat и admin.
 
 ### Схема аутентификации
 
 ```
-1. POST /login { login, password }
+POST /api/login { login, password }
        │
        ├─ KV_USERS.get("login:{login}")  → userId
        ├─ KV_USERS.get("user:{userId}")  → User
-       ├─ crypto.subtle PBKDF2 verify(password, user.passwordHash)
-       └─ выдать JWT / session cookie (httpOnly, Secure)
-
-2. Первый запуск (users = [])
-       └─ показать форму "Создать первого администратора"
-       └─ role = "admin" принудительно
-
-3. Middleware на каждый запрос
-       ├─ проверить JWT
-       ├─ для Admin Console — проверить role === "admin"
-       └─ иначе → 401 / redirect /login
+       ├─ PBKDF2 verify(password, user.passwordHash)
+       └─ signJWT({ sub, login, role }, JWT_SECRET)
+          → Set-Cookie: session={jwt}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=86400
 ```
+
+### Первый запуск (bootstrap)
+
+```
+POST /api/setup { login, password }
+       │
+       ├─ hasUsers(KV_USERS) → false (иначе → 409)
+       └─ createUser(KV_USERS, { login, password, role: "admin" }) → 201
+```
+
+### Middleware
+
+```typescript
+const auth = await requireAuth(request, env.JWT_SECRET);
+if (auth instanceof Response) {
+  return p.startsWith('/api/') ? auth : redirect('/login');
+}
+// auth.user: { sub, login, role, iat, exp }
+```
+
+Admin-только маршруты используют `requireAuth(request, secret, 'admin')` — возвращает 403 при `role !== 'admin'`.
+
+### Session
+
+- Cookie: `session={jwt}`
+- JWT payload: `{ sub: userId, login, role, iat, exp }`
+- TTL: 86 400 сек (24 часа)
+- Алгоритм: HS256 через `crypto.subtle` (Web Crypto API)
 
 ---
 
-## 10. CI/CD Pipelines
+## 10. Shared Module (@ia/shared)
+
+Общий код для всех Workers. Публикуется как npm workspace-пакет.
+
+```
+workers/shared/
+├── src/
+│   ├── index.ts          ← barrel export
+│   ├── auth/
+│   │   ├── password.ts   ← PBKDF2 hashPassword / verifyPassword
+│   │   ├── jwt.ts        ← signJWT / verifyJWT (HS256, Web Crypto)
+│   │   └── middleware.ts ← requireAuth, sessionCookie, clearSessionCookie
+│   └── kv/
+│       └── users.ts      ← createUser, findByLogin, deleteUser, hasUsers, listUsers
+├── package.json          ← name: "@ia/shared"
+└── tsconfig.json
+```
+
+Экспортируемые символы:
+
+| Модуль | Символы |
+|---|---|
+| `auth/password.ts` | `hashPassword`, `verifyPassword` |
+| `auth/jwt.ts` | `signJWT`, `verifyJWT`, `JWTPayload`, `SESSION_TTL` |
+| `auth/middleware.ts` | `requireAuth`, `sessionCookie`, `clearSessionCookie`, `AuthContext` |
+| `kv/users.ts` | `authenticate`, `createUser`, `deleteUser`, `hasUsers`, `getLogins`, `findByLogin`, `findById`, `User` |
+
+---
+
+## 11. CI/CD Pipelines
 
 ### Структура GitHub Actions
 
 ```
 .github/workflows/
-├── ci.yml            ← проверки (lint, audit, secrets, typecheck)
-├── deploy.yml        ← деплой всех Workers после CI
+├── ci.yml            ← typecheck + audit + secret scan
+├── deploy.yml        ← деплой всех трёх Workers
 ├── tf-validate.yml   ← terraform validate (ручной запуск)
-├── tf-plan.yml       ← terraform plan (ручной запуск)
-└── tf-apply.yml      ← terraform apply (ручной запуск)
+├── tf-plan.yml       ← terraform plan → артефакт
+└── tf-apply.yml      ← terraform apply (после approval)
 ```
 
-### `ci.yml` — 4 параллельных job-а
+### `ci.yml`
 
 | Job | Инструмент | Область |
 |---|---|---|
-| Lint | ESLint + @typescript-eslint | все Workers |
-| Dependency Scan | `npm audit --audit-level=high` | все Workers |
-| Secret Scan | Gitleaks | весь репозиторий |
-| Static Analysis | `tsc --noEmit` | все Workers |
+| `typecheck` | `tsc --noEmit` | shared, webchat, agent, admin |
+| `dependency-scan` | `npm audit --audit-level=high` | root workspace |
+| `secret-scan` | Gitleaks | весь репозиторий |
 
-Триггер: `push` + `pull_request` → `main`
+Триггер: `push` + `pull_request` → `main`. Кэш: root `package-lock.json`.
 
-### `deploy.yml` — деплой всех Workers
+### `deploy.yml`
 
 Запускается через `workflow_run` только после `CI → success`.
 
-```yaml
-steps:
-  # каждый шаг запускается из своей working-directory
-  - working-directory: workers/webchat
-    run: npx wrangler deploy
-  - working-directory: workers/agent
-    run: npx wrangler deploy
-  - working-directory: workers/admin
-    run: npx wrangler deploy
+Три параллельных job-а (каждый независим):
+
 ```
+deploy-webchat:
+  working-directory: workers/webchat
+  run: npx wrangler deploy
+
+deploy-agent:
+  working-directory: workers/agent
+  run: npx wrangler deploy
+
+deploy-admin:
+  working-directory: workers/admin
+  run: npx wrangler deploy
+```
+
+Требуемые GitHub Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`.  
+Worker-секреты (`JWT_SECRET`) устанавливаются через `wrangler secret put` отдельно.
 
 ### Terraform Pipelines (ручной запуск)
 
-Управляют Cloudflare-ресурсами: KV Namespaces, Queue, Workers Routes, Secrets.
-
 | Pipeline | Триггер | Действие |
 |---|---|---|
-| `tf-validate.yml` | `workflow_dispatch` | `terraform init` + `terraform validate` |
-| `tf-plan.yml` | `workflow_dispatch` | `terraform plan` → артефакт с планом |
+| `tf-validate.yml` | `workflow_dispatch` | `terraform fmt --check` + `terraform validate` |
+| `tf-plan.yml` | `workflow_dispatch` | `terraform plan` → артефакт (5 дней) |
 | `tf-apply.yml` | `workflow_dispatch` | `terraform apply` по сохранённому плану |
-
-```yaml
-# tf-apply.yml (пример)
-on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Target environment"
-        required: true
-        default: "production"
-```
 
 ---
 
-## 11. Infrastructure as Code (Terraform)
+## 12. Infrastructure as Code (Terraform)
 
 ### Управляемые ресурсы
 
@@ -446,42 +588,56 @@ resource "cloudflare_workers_kv_namespace" "context" { title = "ia-context-kv" }
 resource "cloudflare_workers_kv_namespace" "config"  { title = "ia-config-kv" }
 
 resource "cloudflare_queue" "messages" { name = "ia-messages-queue" }
-
-resource "cloudflare_worker_script" "webchat" { name = "webchat-worker" ... }
-resource "cloudflare_worker_script" "agent"   { name = "agent-worker" ... }
-resource "cloudflare_worker_script" "admin"   { name = "admin-worker" ... }
 ```
+
+Worker Scripts намеренно **не** в Terraform — деплоятся через Wrangler (CI/CD).
 
 ### Структура terraform/
 
 ```
 terraform/
-├── main.tf           ← основные ресурсы
-├── variables.tf      ← входные переменные
-├── outputs.tf        ← ID ресурсов
-└── versions.tf       ← провайдер cloudflare/cloudflare
+├── main.tf           ← KV Namespaces, Queue
+├── variables.tf      ← cloudflare_account_id
+├── outputs.tf        ← ID ресурсов (используются в wrangler.toml)
+├── versions.tf       ← провайдер cloudflare/cloudflare ~> 4.x
+└── backend.hcl       ← Cloudflare R2 backend (не в git)
 ```
 
 ---
 
-## 12. Структура репозитория
+## 13. Структура репозитория
 
 ```
 ia-project/
 ├── workers/
+│   ├── shared/              ← @ia/shared (общий модуль аутентификации)
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   ├── auth/
+│   │   │   └── kv/
+│   │   ├── package.json
+│   │   └── tsconfig.json
 │   ├── webchat/             ← Web Chat Worker
-│   │   ├── src/index.ts
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   └── html.ts
 │   │   ├── wrangler.toml
-│   │   └── package.json
-│   ├── agent/               ← Agent Core Worker
-│   │   ├── src/index.ts
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   ├── agent/               ← Agent Core Worker (Queue consumer)
+│   │   ├── src/
+│   │   │   └── index.ts
 │   │   ├── wrangler.toml
-│   │   └── package.json
+│   │   ├── package.json
+│   │   └── tsconfig.json
 │   └── admin/               ← Admin Console Worker
-│       ├── src/index.ts
+│       ├── src/
+│       │   ├── index.ts
+│       │   └── html.ts
 │       ├── wrangler.toml
-│       └── package.json
-├── terraform/               ← IaC для Cloudflare-ресурсов
+│       ├── package.json
+│       └── tsconfig.json
+├── terraform/               ← IaC (KV Namespaces, Queue)
 │   ├── main.tf
 │   ├── variables.tf
 │   ├── outputs.tf
@@ -494,21 +650,24 @@ ia-project/
 │   └── tf-apply.yml
 ├── docs/
 │   └── adr/
-├── ARCHITECTURE.md          ← этот файл
-└── package.json
+├── ARCHITECTURE.md
+├── IMPLEMENTATION_PLAN.md
+└── package.json             ← npm workspaces root
 ```
 
 ---
 
-## Статус реализации
+## 14. Статус реализации
 
-| Компонент | Статус |
-|---|---|
-| `workers/userchat` (прототип) | ✅ Задеплоен |
-| `workers/webchat` (полная версия) | 🔲 Запланировано |
-| `workers/agent` | 🔲 Запланировано |
-| `workers/admin` | 🔲 Запланировано |
-| Cloudflare Queue | 🔲 Запланировано |
-| KV Namespaces (ia-users, ia-context, ia-config) | 🔲 Запланировано |
-| Authentication (JWT) | 🔲 Запланировано |
-| Terraform pipelines | 🔲 Запланировано |
+| Компонент | URL | Статус |
+|---|---|---|
+| `workers/webchat` | https://webchat-worker.christina-api.workers.dev | ✅ Задеплоен |
+| `workers/agent` | (Queue consumer, нет публичного URL) | ✅ Задеплоен |
+| `workers/admin` | https://admin-worker.christina-api.workers.dev | ✅ Задеплоен |
+| `workers/shared` | npm workspace `@ia/shared` | ✅ Реализован |
+| Cloudflare Queue `ia-messages-queue` | — | ✅ Создан |
+| KV Namespaces (4 шт.) | — | ✅ Созданы |
+| Authentication (JWT + PBKDF2) | — | ✅ Реализована |
+| SSE (TransformStream + KV polling) | — | ✅ Реализована |
+| Terraform IaC | — | ✅ Применён |
+| CI/CD (ci.yml + deploy.yml) | — | ✅ Настроен |

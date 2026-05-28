@@ -15,6 +15,15 @@
 | [ADR-0004](0004-split-ci-cd-pipelines.md) | Разделение CI и CD на отдельные pipeline-ы | Принято |
 | [ADR-0005](0005-security-checks-in-ci.md) | Четыре уровня безопасности в CI | Принято |
 | [ADR-0006](0006-wrangler-v4-node22.md) | Wrangler v4 и Node.js v22 | Принято |
+| [ADR-0007](0007-three-worker-architecture.md) | Три специализированных Worker вместо одного | Принято |
+| [ADR-0008](0008-pbkdf2-instead-of-bcrypt.md) | PBKDF2 через Web Crypto API вместо bcrypt | Принято |
+| [ADR-0009](0009-cloudflare-queue-for-ai-processing.md) | Cloudflare Queue для асинхронной обработки AI | Принято |
+| [ADR-0010](0010-sse-via-transformstream-kv-polling.md) | SSE через TransformStream + KV polling без Durable Objects | Принято |
+| [ADR-0011](0011-sse-filtering-by-message-id.md) | Фильтрация SSE-ответа по ID сообщения вместо timestamp | Принято |
+| [ADR-0012](0012-shared-npm-workspace.md) | Общий модуль @ia/shared через npm workspace | Принято |
+| [ADR-0013](0013-cloudflare-workers-ai-as-llm.md) | Cloudflare Workers AI как LLM провайдер | Принято |
+| [ADR-0014](0014-terraform-for-infra-wrangler-for-workers.md) | Terraform для инфраструктуры, Wrangler для деплоя Workers | Принято |
+| [ADR-0015](0015-kv-dual-index-for-users.md) | Двойной индекс KV_USERS для поиска по логину | Принято |
 
 ## Как добавить новый ADR
 
