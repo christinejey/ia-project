@@ -27,6 +27,19 @@ const DEFAULT_SYSTEM = 'You are a helpful AI assistant.';
 
 // --- Response helpers ---
 
+const SEC_HEADERS: HeadersInit = {
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+  'Cache-Control': 'no-store',
+  'Content-Security-Policy':
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+};
+
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -35,7 +48,9 @@ function json(data: unknown, status = 200): Response {
 }
 
 function htmlRes(body: string): Response {
-  return new Response(body, { headers: { 'Content-Type': 'text/html;charset=utf-8' } });
+  return new Response(body, {
+    headers: { 'Content-Type': 'text/html;charset=utf-8', ...SEC_HEADERS },
+  });
 }
 
 function redirect(location: string): Response {
