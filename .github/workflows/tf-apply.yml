@@ -2,14 +2,6 @@ name: Terraform Apply
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: "Target environment"
-        required: true
-        default: "production"
-        type: choice
-        options:
-          - production
 
 permissions: read-all
 
@@ -72,7 +64,7 @@ jobs:
     name: Apply
     needs: plan
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: production
     if: needs.plan.outputs.exitcode == '2'
     steps:
       - uses: actions/checkout@v4
