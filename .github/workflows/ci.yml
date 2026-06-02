@@ -8,9 +8,7 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-  actions: read  # required by gitleaks-action
+permissions: read-all
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"

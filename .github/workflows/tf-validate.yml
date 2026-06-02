@@ -3,8 +3,7 @@ name: Terraform Validate
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: read-all
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
