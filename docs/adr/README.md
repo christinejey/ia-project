@@ -25,6 +25,7 @@
 | [ADR-0014](0014-terraform-for-infra-wrangler-for-workers.md) | Terraform для инфраструктуры, Wrangler для деплоя Workers | Принято |
 | [ADR-0015](0015-kv-dual-index-for-users.md) | Двойной индекс KV_USERS для поиска по логину | Принято |
 | [ADR-0016](0016-security-headers-on-html-responses.md) | Security headers на HTML-ответах Workers | Принято |
+| [ADR-0017](0017-zap-round2-security-headers-fixes.md) | Исправление второй итерации OWASP ZAP (5 WARN) | Принято |
 
 ## Как добавить новый ADR
 
