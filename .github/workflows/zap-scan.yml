@@ -23,6 +23,7 @@ jobs:
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: https://webchat-worker.christina-api.workers.dev
+          rules_file_name: .zap/rules.tsv
           fail_action: true
           allow_issue_writing: false
 
@@ -37,5 +38,6 @@ jobs:
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: https://admin-worker.christina-api.workers.dev
+          rules_file_name: .zap/rules.tsv
           fail_action: true
           allow_issue_writing: false

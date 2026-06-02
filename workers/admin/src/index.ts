@@ -35,9 +35,11 @@ const SEC_HEADERS: HeadersInit = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',
-  'Cache-Control': 'no-store',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'Cache-Control': 'no-store, no-cache',
+  'Pragma': 'no-cache',
   'Content-Security-Policy':
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
 };
 
 function json(data: unknown, status = 200): Response {
