@@ -28,6 +28,7 @@
 | [ADR-0017](0017-zap-round2-security-headers-fixes.md) | Исправление второй итерации OWASP ZAP (5 WARN) | Принято |
 | [ADR-0018](0018-zap-round3-final-warn-fixes.md) | Исправление третьей итерации OWASP ZAP (2 WARN) | Принято |
 | [ADR-0019](0019-zap-docker-direct-drop-action-wrapper.md) | Запуск ZAP через Docker напрямую без action wrapper | Принято |
+| [ADR-0020](0020-stride-spoofing-audit.md) | STRIDE Spoofing Audit — результаты и план исправлений | Принято |
 
 ## Как добавить новый ADR
 
