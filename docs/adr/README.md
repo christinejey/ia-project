@@ -30,6 +30,7 @@
 | [ADR-0019](0019-zap-docker-direct-drop-action-wrapper.md) | Запуск ZAP через Docker напрямую без action wrapper | Принято |
 | [ADR-0020](0020-stride-spoofing-audit.md) | STRIDE Spoofing Audit — результаты и план исправлений | Принято |
 | [ADR-0021](0021-stride-spoofing-audit-round2.md) | STRIDE Spoofing Audit Round 2 — 6 новых уязвимостей | Принято |
+| [ADR-0022](0022-stride-tampering-audit.md) | STRIDE Tampering Audit — 15 уязвимостей | Принято |
 
 ## Как добавить новый ADR
 
