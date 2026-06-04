@@ -24,6 +24,7 @@ jobs:
         with:
           target: https://webchat-worker.christina-api.workers.dev
           rules_file_name: .zap/rules.tsv
+          artifact_name: zap_scan_webchat
           fail_action: true
           allow_issue_writing: false
 
@@ -39,5 +40,6 @@ jobs:
         with:
           target: https://admin-worker.christina-api.workers.dev
           rules_file_name: .zap/rules.tsv
+          artifact_name: zap_scan_admin
           fail_action: true
           allow_issue_writing: false
