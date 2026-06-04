@@ -1,2 +1,3 @@
 10049	IGNORE	(Non-Storable Content — expected: Cache-Control: no-store is intentional for auth pages)
 10109	IGNORE	(Modern Web Application — informational alert, not a vulnerability)
+10055	IGNORE	(CSP unsafe-inline — architectural constraint: inline scripts in html.ts; nonce-based CSP tracked in ADR-0018)
